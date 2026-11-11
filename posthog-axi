@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+POSTHOG_AXI_VERSION="0.1.0"
+POSTHOG_CLI="${POSTHOG_AXI_CLI:-posthog-cli}"
+
+die() { echo "error: $*" >&2; exit 1; }
+die_usage() { echo "error: $*" >&2; echo "help: posthog-axi --help" >&2; exit 2; }
+
+_require_cli() {
+  command -v "$POSTHOG_CLI" >/dev/null 2>&1 || die "posthog-cli not found on PATH. Install: npm i -g @posthog/cli"
+}
+
+_require_project() {
+  : "${POSTHOG_CLI_API_KEY:=${POSTHOG_PERSONAL_API_KEY:-}}" 
+  : "${POSTHOG_CLI_PROJECT_ID:=${POSTHOG_PROJECT_ID:-}}"
+  [ -z "${POSTHOG_CLI_API_KEY:-}" ] && die "POSTHOG_CLI_API_KEY (or POSTHOG_PERSONAL_API_KEY) not set"
+  [ -z "${POSTHOG_CLI_PROJECT_ID:-}" ] && die "POSTHOG_CLI_PROJECT_ID (or POSTHOG_PROJECT_ID) not set"
+}
+
+_cmd_home() {
+  cat <<EOF
+bin: $(command -v "$0" 2>/dev/null || echo "posthog-axi")
+description: Agent-ergonomic PostHog CLI wrapper with TOON output
+version: $POSTHOG_AXI_VERSION
+
+commands[7]{command,description}:
+  tools,List available PostHog API tools
+  search <pattern>,Search tools by name or description
+  info <tool>,Show tool description and input schema
+  schema <tool> [path],Drill into a nested schema field
+  call <tool> '<json>',Execute a tool with JSON input
+  flags,Manage feature flags (list, get, toggle)
+  insights,List and inspect insights and dashboards
+
+help[2]:
+  Run \`posthog-axi <command> --help\` for command details
+  Set POSTHOG_CLI_API_KEY and POSTHOG_CLI_PROJECT_ID for authentication
+EOF
+}
+
+_cmd_tools() {
+  _require_cli
+  local limit="${1:-100}"
+  "$POSTHOG_CLI" api tools 2>/dev/null | head -n "$limit"
+}
+
+_cmd_search() {
+  local pattern="${1:-}"
+  [ -z "$pattern" ] && die_usage "search requires a pattern"
+  _require_cli
+  "$POSTHOG_CLI" api search "$pattern" 2>/dev/null
+}
+
+_cmd_info() {
+  local tool="${1:-}"
+  [ -z "$tool" ] && die_usage "info requires a tool name"
+  _require_cli
+  "$POSTHOG_CLI" api info "$tool" 2>/dev/null
+}
+
+_cmd_schema() {
+  local tool="${1:-}"
+  [ -z "$tool" ] && die_usage "schema requires a tool name"
+  shift
+  _require_cli
+  "$POSTHOG_CLI" api schema "$tool" "$@" 2>/dev/null
+}
+
+_cmd_call() {
+  local tool="${1:-}"
+  [ -z "$tool" ] && die_usage "call requires a tool name"
+  shift
+  local input="${1:-}"
+  [ -z "$input" ] && die_usage "call requires JSON input"
+  _require_cli
+  _require_project
+  "$POSTHOG_CLI" api call "$tool" "$input" 2>/dev/null
+}
+
+_cmd_flags() {
+  _require_cli
+  _require_project
+  local subcmd="${1:-list}"
+  shift || true
+
+  case "$subcmd" in
+    list)
+      local json
+      json=$("$POSTHOG_CLI" api call listFeatureFlags '{}' --json 2>/dev/null) || die "Failed to list feature flags"
+      if command -v jq >/dev/null 2>&1; then
+        local count
+        count=$(echo "$json" | jq '.results | length' 2>/dev/null || echo "?")
+        echo "flags[${count}]{key,active,description}:"
+        echo "$json" | jq -r '.results[] | [.key, (.active // false | tostring), (.description // "-" | .[0:60])] | @tsv' 2>/dev/null | tr '\t' ','
+      else
+        echo "$json"
+      fi
+      ;;
+    get)
+      local key="${1:-}"
+      [ -z "$key" ] && die_usage "flags get requires a flag key"
+      "$POSTHOG_CLI" api call getFeatureFlag "{\"key\": \"$key\"}" --json 2>/dev/null || die "Failed to get flag: $key"
+      ;;
+    toggle)
+      local key="${1:-}"
+      local state="${2:-}"
+      [ -z "$key" ] && die_usage "flags toggle requires a flag key"
+      [ -z "$state" ] && die_usage "flags toggle requires 'on' or 'off'"
+      local active="true"
+      [ "$state" = "off" ] && active="false"
+      "$POSTHOG_CLI" api call updateFeatureFlag "{\"key\": \"$key\", \"active\": $active}" --confirm --json 2>/dev/null || die "Failed to toggle flag: $key"
+      echo "flag: $key active=$active"
+      ;;
+    *)
+      die_usage "unknown flags subcommand '$subcmd'. Use: list, get, toggle"
+      ;;
+  esac
+}
+
+_cmd_insights() {
+  _require_cli
+  _require_project
+  local json
+  json=$("$POSTHOG_CLI" api call listInsights '{}' --json 2>/dev/null) || die "Failed to list insights"
+  if command -v jq >/dev/null 2>&1; then
+    local count
+    count=$(echo "$json" | jq '.results | length' 2>/dev/null || echo "?")
+    echo "insights[${count}]{id,name,type}:"
+    echo "$json" | jq -r '.results[] | [.id, (.name // "-" | .[0:50]), (.derived_name // .type // "-")] | @tsv' 2>/dev/null | tr '\t' ','
+  else
+    echo "$json"
+  fi
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+
+  case "$cmd" in
+    "")         _cmd_home ;;
+    --help|-h)  _cmd_home ;;
+    --version)  echo "posthog-axi $POSTHOG_AXI_VERSION" ;;
+    tools)      _cmd_tools "$@" ;;
+    search)     _cmd_search "$@" ;;
+    info)       _cmd_info "$@" ;;
+    schema)     _cmd_schema "$@" ;;
+    call)       _cmd_call "$@" ;;
+    flags)      _cmd_flags "$@" ;;
+    insights)   _cmd_insights "$@" ;;
+    *)          die_usage "unknown command '$cmd'" ;;
+  esac
+}
+
+main "$@"

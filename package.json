@@ -1,0 +1,41 @@
+{
+  "name": "@masculinecache/posthog-axi",
+  "version": "0.1.0",
+  "description": "Agent-ergonomic PostHog CLI wrapper with TOON output — feature flags, experiments, analytics, and insights via @posthog/cli",
+  "bin": {
+    "posthog-axi": "posthog-axi"
+  },
+  "files": [
+    "posthog-axi",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "./tests/run.sh",
+    "pack:check": "npm publish --dry-run"
+  },
+  "keywords": [
+    "agent",
+    "posthog",
+    "cli",
+    "axi",
+    "toon",
+    "feature-flags",
+    "analytics",
+    "experiments"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/masculinecache/posthog-axi.git"
+  },
+  "homepage": "https://github.com/masculinecache/posthog-axi#readme",
+  "bugs": {
+    "url": "https://github.com/masculinecache/posthog-axi/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
